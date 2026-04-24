@@ -1,0 +1,18 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: yes
+
+- name: Restart Prometheus service
+  ansible.builtin.systemd:
+    name: Prometheus
+    state: restarted
+  become: yes
+
+- name: Reload prometheus configuration
+  ansible.builtin.uri:
+    url: "http://localhost:{{ prometheus_port }}/-/reload"
+    method: POST
+    status_code: 200
+  become: yes

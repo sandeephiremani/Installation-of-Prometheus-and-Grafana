@@ -1,0 +1,19 @@
+[Unit]
+Description=Node Exporter
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User={{ node_exporter_user }}
+Group={{ node_exporter_user }}
+Type=simple
+ExecStart={{ node_exporter_install_dir }}/node_exporter \
+    --web.listen-address=:{{ node_exporter_port }} \
+    --collector.filesystem.mount-points-exclude="^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)" \
+    --collector.netclass.ignored-devices="^(veth.*)$"
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

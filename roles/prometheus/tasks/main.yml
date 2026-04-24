@@ -1,0 +1,109 @@
+---
+#=========================================
+#  Prometheus Playbook
+#==========================================
+- name: Prometheus user creation
+  ansible.builtin.user:
+    name: "{{ prometheus_user }}"
+    shell: /sbin/nologin
+    system: yes
+    create_home: false
+  
+- name: Create Prometheus directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0755'
+  loop:
+    - "{{ prometheus_config_dir }}"
+    - "{{ prometheus_config_dir }}/rules"
+    - "{{ prometheus_data_dir }}"
+
+- name: Check if the Prometheus binary already exists
+  ansible.builtin.stat:
+    path: "{{ prometheus_install_dir }}/prometheus"
+  register: prometheus_binary
+
+- name: Download the Prometheus using tarball
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/prometheus.tar.gz"
+    mode: '0644'
+  when: not prometheus_binary.stat.exists
+
+- name: Extract the Prometheus binary
+  ansible.builtin.unarchive:
+    src: "/tmp/prometheus.tar.gz"
+    dest: "/tmp/"
+    remote_src: yes
+  when: not prometheus_binary.stat.exists and not ansible_check_mode
+
+- name: Move the Prometheus binary to the install directory
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+    dest: "{{ prometheus_install_dir }}/{{ item }}"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0755'
+    remote_src: yes
+  loop:
+    - prometheus
+    - promtool
+  when: not prometheus_binary.stat.exists and not ansible_check_mode
+  notify: Restart Prometheus
+
+- name: Copy Prometheus configuration file
+  ansible.builtin.template:
+    src: "prometheus.yml.j2"
+    dest: "{{ prometheus_config_dir }}/prometheus.yml"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0644'
+    validate: "{{ prometheus_install_dir }}/promtool check config %s"
+  notify: Restart Prometheus service
+  when: not ansible_check_mode
+
+- name: Deploy Prometheus systemd service
+  ansible.builtin.template:
+    src: "prometheus.service.j2"
+    dest: "{{ prometheus_systemd_dir }}/prometheus.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+   - Reload systemd daemon
+   - Restart Prometheus service
+  when: not ansible_check_mode
+
+- name: Enable and start Prometheus service
+  ansible.builtin.systemd:  
+    name: prometheus
+    enabled: yes
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Install firewalld and dependencies
+  ansible.builtin.package:
+    name:
+      - firewalld
+      - python3-firewall
+    state: present
+
+- name: Allow Prometheus port through firewall
+  ansible.posix.firewalld:
+    port: "{{ prometheus_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: yes
+  ignore_errors: yes # In case firewalld is not installed or running  
+
+- name: Clean up download files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/prometheus.tar.gz"
+    - "/tmp/prometheus-{{ prometheus_version }}.linux-amd64"

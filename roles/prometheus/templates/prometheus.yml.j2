@@ -1,0 +1,47 @@
+global:
+  scrape_interval: {{ prometheus_scrape_interval }}
+  evaluation_interval: {{ prometheus_evaluation_interval }}
+  external_labels:
+    monitor: 'proxmox-cluster'
+
+# Alertmanager config (optional - uncomment to enable)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['localhost:9093']
+
+# Rule files (place .yml files in {{ prometheus_config_dir }}/rules/)
+rule_files:
+  - "rules/*.yml"
+
+# ============================================================
+# Scrape Configs
+# ============================================================
+
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:{{ prometheus_port }}']
+        labels:
+          instance: 'prometheus-server'
+
+  # Node Exporter — dynamically populated from inventory group
+  - job_name: 'node_exporter'
+    scrape_interval: {{ prometheus_scrape_interval }}
+    static_configs:
+      - targets:
+{% for host in groups['node_exporter_servers'] %}
+          - '{{ hostvars[host]['ansible_host'] }}:{{ node_exporter_port }}'
+{% endfor %}
+{% if 'prometheus_server' in groups %}
+{% for host in groups['prometheus_server'] %}
+          - '{{ hostvars[host]['ansible_host'] }}:{{ node_exporter_port }}'
+{% endfor %}
+{% endif %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+)(:[0-9]+)?'
+        replacement: '${1}'

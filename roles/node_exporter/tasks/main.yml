@@ -1,0 +1,87 @@
+---
+#=======================================================
+# Role: Node Exporter - Tasks
+#=======================================================
+- name: Create node_exporter user
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    shell: /sbin/nologin
+    system: yes
+
+- name: Check if the Node exporter binary already exists
+  ansible.builtin.stat:
+    path: "{{ node_exporter_install_dir }}/node_exporter"
+  register: node_exporter_binary
+
+- name: Check if the Node exporter tar exists
+  ansible.builtin.stat:
+    path: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+  register: node_exporter_tar
+
+- name: Download the Node exporter binary
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz
+    mode: '0644'
+  when: not node_exporter_binary.stat.exists and not node_exporter_tar.stat.exists and not ansible_check_mode
+
+- name: Extract the Node exporter binary
+  ansible.builtin.unarchive:
+    src: /tmp/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz
+    dest: /tmp/
+    remote_src: yes
+  when: not node_exporter_binary.stat.exists and not ansible_check_mode
+
+- name: Move the Node exporter binary to the install directory
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: "{{ node_exporter_install_dir }}/node_exporter"
+    owner: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_user }}"    
+    mode: '0755'
+    remote_src: yes
+  when: not node_exporter_binary.stat.exists and not ansible_check_mode
+  notify: Restart Node Exporter
+
+- name: Deploy Node exporter systemd service
+  ansible.builtin.template:
+    src: "node_exporter.service.j2"
+    dest: "{{ node_exporter_systemd_dir }}/node_exporter.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+   - Reload systemd 
+   - Restart Node Exporter
+  when: not ansible_check_mode
+
+- name: Enable and start Node exporter service
+  ansible.builtin.systemd:
+    name: node_exporter
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  when: not ansible_check_mode
+
+- name: Install firewalld and dependencies
+  ansible.builtin.package:
+    name:
+      - firewalld
+      - python3-firewall
+    state: present
+
+- name: Allow Node exporter port through firewall
+  ansible.builtin.firewalld:
+    port: "{{ node_exporter_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: yes
+  ignore_errors: yes # In case firewalld is not installed or running
+
+- name: Clean up download files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"

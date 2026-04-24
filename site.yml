@@ -1,0 +1,41 @@
+#==================================
+# Site.yml - Master Playbook
+# Deploys Prometheus and Node Exporter across the proxomox vms
+# Usage: ansible-playbook -i hosts.ini site.yml
+#==================================
+
+# Step 1: Install Node Exporter on all servers
+- name: Install Node Exporter on all servers
+  hosts: node_exporter_servers
+  become: yes
+  gather_facts: true
+  roles:
+    - node_exporter
+
+# Step 2: Install Prometheus on the Prometheus server
+- name: Install Prometheus on the Prometheus server
+  hosts: Prometheus_servers
+  become: yes
+  gather_facts: true  
+  roles:
+    - prometheus
+
+# verifying the installation
+- name: Verify Node monitoring
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Check if Node Exporter is running
+      ansible.builtin.uri:
+        url: "http://{{ansible_host}}:{{node_exporter_port}}/metrics"
+        status_code: 200
+      delegate_to: localhost
+      when: inventory_hostname in groups['node_exporter_servers']
+
+    - name: Check if Prometheus is running
+      ansible.builtin.uri:
+        url: "http://{{ansible_host}}:{{prometheus_port}}/metrics"
+        status_code: 200
+      delegate_to: localhost
+      when: inventory_hostname in groups['Prometheus_servers'] 
